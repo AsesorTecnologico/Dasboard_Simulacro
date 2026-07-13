@@ -41,9 +41,9 @@ function aplicarPermisos(){
  headerScope.textContent=currentUser.perfil==="sede"?`Acceso limitado a ${currentUser.sede}`:"Acceso institucional";
  document.querySelectorAll(".admin-only").forEach(x=>x.style.display=currentUser.perfil==="admin"?"inline-block":"none");
  sede.innerHTML='<option value="">Seleccione sede</option>'+sedes.map(s=>`<option>${s}</option>`).join("");
- if(currentUser.perfil==="sede"){sede.value=currentUser.sede;sede.disabled=true}else sede.disabled=false;inicializarFiltrosDashboard();inicializarFiltrosSeguimiento();alumnos=[];contextoAnterior=null;renderCargaPreguntas();updateSummary();
+ if(currentUser.perfil==="sede"){sede.value=currentUser.sede;sede.disabled=true}else sede.disabled=false;inicializarFiltrosDashboard();inicializarFiltrosSeguimiento();inicializarGestionAlumnos();alumnos=[];contextoAnterior=null;renderCargaPreguntas();updateSummary();
 }
-document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.getElementById(b.dataset.view).classList.add("active");if(b.dataset.view==="dashboard"){actualizarOpcionesAula();actualizarDashboard();}if(b.dataset.view==="seguimiento"){actualizarSeguimiento();}if(b.dataset.view==="preguntas")renderPreguntasConfig();if(b.dataset.view==="rangos"){cargarRangosGrado();renderRangosCurso()}if(b.dataset.view==="usuarios")renderUsers()}));
+document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));b.classList.add("active");document.getElementById(b.dataset.view).classList.add("active");if(b.dataset.view==="dashboard"){actualizarOpcionesAula();actualizarDashboard();}if(b.dataset.view==="seguimiento"){actualizarSeguimiento();}if(b.dataset.view==="gestionAlumnos"){cargarAlumnosAdministracion();}if(b.dataset.view==="preguntas")renderPreguntasConfig();if(b.dataset.view==="rangos"){cargarRangosGrado();renderRangosCurso()}if(b.dataset.view==="usuarios")renderUsers()}));
 
 function plantillaBase(){
  const bloques=[["RAZ. VERBAL",6],["RAZ. MATEMÁTICO",6],["ARITMÉTICA",4],["ÁLGEBRA",4],["GEOMETRÍA",4],["TRIGONOMETRÍA",4],["FÍSICA",4],["QUÍMICA",4],["BIOLOGÍA",4],["LENGUAJE",4],["LITERATURA",4],["HISTORIA DEL PERÚ Y EL MUNDO",4],["GEOGRAFÍA",4],["INGLÉS",4],["CULTURA GENERAL",2]];
@@ -973,6 +973,154 @@ function actualizarSeguimiento(){
   segTotalRiesgo.textContent=totalAD+totalA+totalB+totalC;
   segAlertas.textContent=totalAlertas;
   segMejoras.textContent=totalMejoras;
+}
+
+
+function inicializarGestionAlumnos(){
+  const sel=document.getElementById("adminAlumSede");
+  if(!sel)return;
+  sel.innerHTML='<option value="">Seleccione sede</option>'+sedes.map(s=>`<option>${s}</option>`).join("");
+}
+
+function validarAdministradorAlumnos(){
+  if(!currentUser||currentUser.perfil!=="admin"){
+    alert("Esta función está disponible únicamente para el Administrador.");
+    return false;
+  }
+  return true;
+}
+
+function obtenerRegistrosGestionAlumnos(){
+  if(!validarAdministradorAlumnos())return [];
+  const sedeSel=adminAlumSede.value;
+  const gradoSel=adminAlumGrado.value;
+  const seccionSel=adminAlumSeccion.value;
+  const periodoSel=adminAlumPeriodo.value;
+  const alcance=adminAlumAlcance.value;
+  if(!sedeSel||!gradoSel||!seccionSel)return [];
+  return registrosPermitidosPorPerfil().filter(r=>
+    r.sede===sedeSel&&r.grado===gradoSel&&r.seccion===seccionSel&&
+    (alcance==="AULA_COMPLETA"||r.periodo===periodoSel)
+  );
+}
+
+function normalizarNombreAlumno(nombre){
+  return String(nombre||"").trim().toLocaleLowerCase("es");
+}
+
+function cargarAlumnosAdministracion(){
+  const body=document.getElementById("adminAlumBody");
+  if(!body)return;
+  body.innerHTML="";
+  if(!currentUser||currentUser.perfil!=="admin")return;
+
+  const registros=obtenerRegistrosGestionAlumnos();
+  const buscar=normalizarNombreAlumno(adminAlumBuscar.value);
+  const mapa=new Map();
+  registros.forEach(registro=>{
+    (registro.alumnos||[]).forEach(alumno=>{
+      const key=normalizarNombreAlumno(alumno.nombre);
+      if(buscar&&!key.includes(buscar))return;
+      if(!mapa.has(key))mapa.set(key,{nombre:alumno.nombre,periodos:new Set(),niveles:new Set()});
+      const item=mapa.get(key);
+      item.periodos.add(registro.periodo);
+      if(alumno.nivelFinal)item.niveles.add(alumno.nivelFinal);
+    });
+  });
+
+  [...mapa.values()].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es")).forEach(item=>{
+    const periodos=[...item.periodos].join(", ");
+    const niveles=[...item.niveles].join(", ")||"-";
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td><input type="checkbox" class="admin-alumno-check" data-nombre="${item.nombre.replace(/"/g,"&quot;")}" style="width:auto;min-height:auto" onchange="actualizarConteoSeleccionAdmin()"></td>
+      <td><strong>${item.nombre}</strong></td><td>${adminAlumSede.value}</td><td>${adminAlumGrado.value}</td><td>${adminAlumSeccion.value}</td>
+      <td>${periodos}</td><td>${niveles}</td>
+      <td><button class="btn-red" onclick='eliminarAlumnoIndividualAdmin(${JSON.stringify(item.nombre)})'>Eliminar</button></td>`;
+    body.appendChild(tr);
+  });
+
+  if(!body.children.length){
+    body.innerHTML='<tr><td colspan="8">No existen alumnos para los filtros seleccionados.</td></tr>';
+  }
+  adminAlumTotal.textContent=mapa.size;
+  adminAlumRegistros.textContent=registros.length;
+  adminAlumSeleccionados.textContent="0";
+  adminAlumSeleccionarTodos.checked=false;
+}
+
+function seleccionarTodosAlumnosAdmin(checked){
+  document.querySelectorAll(".admin-alumno-check").forEach(x=>x.checked=checked);
+  actualizarConteoSeleccionAdmin();
+}
+
+function actualizarConteoSeleccionAdmin(){
+  const checks=[...document.querySelectorAll(".admin-alumno-check")];
+  adminAlumSeleccionados.textContent=checks.filter(x=>x.checked).length;
+  adminAlumSeleccionarTodos.checked=checks.length>0&&checks.every(x=>x.checked);
+  adminAlumSeleccionarTodos.indeterminate=checks.some(x=>x.checked)&&!checks.every(x=>x.checked);
+}
+
+async function eliminarAlumnoIndividualAdmin(nombre){
+  if(!validarAdministradorAlumnos())return;
+  const alcanceTexto=adminAlumAlcance.value==="AULA_COMPLETA"?"todos los bimestres del aula":"el bimestre seleccionado";
+  if(!confirm(`¿Eliminar a ${nombre} de ${alcanceTexto}? Esta acción también eliminará sus notas y resultados asociados.`))return;
+  await ejecutarEliminacionAlumnosAdmin([nombre]);
+}
+
+async function eliminarAlumnosSeleccionados(){
+  if(!validarAdministradorAlumnos())return;
+  const nombres=[...document.querySelectorAll(".admin-alumno-check:checked")].map(x=>x.dataset.nombre);
+  if(!nombres.length){alert("Seleccione al menos un alumno.");return;}
+  const alcanceTexto=adminAlumAlcance.value==="AULA_COMPLETA"?"todos los bimestres del aula":"el bimestre seleccionado";
+  if(!confirm(`¿Eliminar ${nombres.length} alumno(s) de ${alcanceTexto}? Se eliminarán sus notas y resultados asociados.`))return;
+  await ejecutarEliminacionAlumnosAdmin(nombres);
+}
+
+async function ejecutarEliminacionAlumnosAdmin(nombres){
+  const registros=obtenerRegistrosGestionAlumnos();
+  if(!registros.length){alert("No existen registros para eliminar.");return;}
+  const objetivo=new Set(nombres.map(normalizarNombreAlumno));
+  let eliminados=0;
+
+  registros.forEach(registro=>{
+    const antes=(registro.alumnos||[]).length;
+    registro.alumnos=(registro.alumnos||[]).filter(a=>!objetivo.has(normalizarNombreAlumno(a.nombre)));
+    eliminados+=antes-registro.alumnos.length;
+    const key=`notas_${registro.sede}_${registro.grado}_${registro.seccion}_${registro.periodo}`;
+    localStorage.setItem(key,JSON.stringify(registro));
+    if(claveContextoActual()===key){
+      alumnos=registro.alumnos;
+      renderCargaPreguntas();
+      updateSummary();
+    }
+  });
+
+  try{
+    if(googleSheetsConfigured()){
+      const respuesta=await postToGoogleSheets({
+        action:"deleteStudents",
+        sede:adminAlumSede.value,
+        grado:adminAlumGrado.value,
+        seccion:adminAlumSeccion.value,
+        periodo:adminAlumPeriodo.value,
+        alcance:adminAlumAlcance.value,
+        nombres
+      });
+      setSheetsStatus(respuesta.opaque?"Eliminación enviada a Google Sheets.":"Alumnos eliminados y Google Sheets actualizado.");
+    }
+  }catch(error){
+    console.error(error);
+    setSheetsStatus("La eliminación local fue correcta, pero Google Sheets reportó: "+error.message,true);
+  }
+
+  adminAlumStatus.style.display="block";
+  adminAlumStatus.style.background="#eef6ff";
+  adminAlumStatus.style.color="#15324b";
+  adminAlumStatus.textContent=`Se eliminaron ${eliminados} registro(s) de alumno. La lista, notas, resultados y estadísticas fueron actualizadas.`;
+  cargarAlumnosAdministracion();
+  actualizarDashboard();
+  actualizarSeguimiento();
 }
 
 function registrosVisibles(){
