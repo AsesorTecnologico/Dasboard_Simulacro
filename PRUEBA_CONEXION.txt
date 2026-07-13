@@ -1,0 +1,19 @@
+PRUEBA DE CONEXION
+
+1. Reemplace Code.gs en Apps Script.
+2. Ejecute configurarSistema y autorice.
+3. Publique una NUEVA VERSION de la aplicacion web.
+4. Abra en una ventana privada:
+https://script.google.com/macros/s/AKfycbxFXmuRuyXFKMMurZ3_wzkyjt6bRb_pWhBgvzDbhA6rgUYeCFHoxNfWc-N2D9FZF6C7/exec?action=ping
+
+Debe devolver JSON con ok:true.
+
+5. Abra el proyecto mediante HTTP:
+python -m http.server 8000
+
+6. Ingrese a http://localhost:8000
+7. Modifique un registro y pulse Guardar.
+8. La pantalla debe indicar que el cambio fue sincronizado y verificado.
+9. Revise las hojas Datos_Sistema, Estudiantes, Notas y Resultados.
+
+La hoja Datos_Sistema ahora divide registros grandes en varias filas para evitar el limite de 50 000 caracteres por celda.

@@ -1,0 +1,17 @@
+SOLUCION IMPLEMENTADA
+=====================
+
+CAUSA DEL ERROR
+El Web App anterior solo cargaba la hoja Datos_Sistema. Si Usuarios, Preguntas, Estudiantes u otras hojas tenian filas ingresadas directamente, la pagina no las convertia a su estructura interna.
+
+SOLUCION
+1. Code.gs ahora reconstruye el estado de la pagina desde las hojas tabulares.
+2. Usuarios se transforma a usuariosSistema.
+3. Preguntas se agrupa por grado.
+4. Rangos por grado y curso se reconstruyen.
+5. Estudiantes, Notas/Respuestas y Resultados se combinan por sede, grado, seccion y bimestre.
+6. Se agrego el boton Cargar desde hoja.
+7. El inicio de sesion espera la carga inicial, por lo que los usuarios creados en Sheets pueden ingresar.
+
+PASO OBLIGATORIO
+Reemplace Code.gs en Apps Script y publique una NUEVA VERSION de la aplicacion web. Mantenga la misma URL /exec.
