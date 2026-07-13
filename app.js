@@ -976,8 +976,12 @@ function actualizarSeguimiento(){
 }
 
 
+function adminEl(id){
+  return document.getElementById(id);
+}
+
 function inicializarGestionAlumnos(){
-  const sel=document.getElementById("adminAlumSede");
+  const sel=adminEl("adminAlumSede");
   if(!sel)return;
   sel.innerHTML='<option value="">Seleccione sede</option>'+sedes.map(s=>`<option>${s}</option>`).join("");
 }
@@ -990,17 +994,24 @@ function validarAdministradorAlumnos(){
   return true;
 }
 
+function obtenerFiltrosGestionAlumnos(){
+  return {
+    sede:adminEl("adminAlumSede")?.value||"",
+    grado:adminEl("adminAlumGrado")?.value||"",
+    seccion:adminEl("adminAlumSeccion")?.value||"",
+    periodo:adminEl("adminAlumPeriodo")?.value||"",
+    alcance:adminEl("adminAlumAlcance")?.value||"PERIODO",
+    buscar:normalizarNombreAlumno(adminEl("adminAlumBuscar")?.value||"")
+  };
+}
+
 function obtenerRegistrosGestionAlumnos(){
   if(!validarAdministradorAlumnos())return [];
-  const sedeSel=adminAlumSede.value;
-  const gradoSel=adminAlumGrado.value;
-  const seccionSel=adminAlumSeccion.value;
-  const periodoSel=adminAlumPeriodo.value;
-  const alcance=adminAlumAlcance.value;
-  if(!sedeSel||!gradoSel||!seccionSel)return [];
+  const f=obtenerFiltrosGestionAlumnos();
+  if(!f.sede||!f.grado||!f.seccion)return [];
   return registrosPermitidosPorPerfil().filter(r=>
-    r.sede===sedeSel&&r.grado===gradoSel&&r.seccion===seccionSel&&
-    (alcance==="AULA_COMPLETA"||r.periodo===periodoSel)
+    r.sede===f.sede&&r.grado===f.grado&&r.seccion===f.seccion&&
+    (f.alcance==="AULA_COMPLETA"||r.periodo===f.periodo)
   );
 }
 
@@ -1008,19 +1019,36 @@ function normalizarNombreAlumno(nombre){
   return String(nombre||"").trim().toLocaleLowerCase("es");
 }
 
+function escaparHtmlAdmin(value){
+  return String(value??"")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/\"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
 function cargarAlumnosAdministracion(){
-  const body=document.getElementById("adminAlumBody");
+  const body=adminEl("adminAlumBody");
   if(!body)return;
   body.innerHTML="";
   if(!currentUser||currentUser.perfil!=="admin")return;
 
+  const f=obtenerFiltrosGestionAlumnos();
+  if(!f.sede||!f.grado||!f.seccion){
+    body.innerHTML='<tr><td colspan="8">Seleccione sede, grado y sección.</td></tr>';
+    adminEl("adminAlumTotal").textContent="0";
+    adminEl("adminAlumRegistros").textContent="0";
+    adminEl("adminAlumSeleccionados").textContent="0";
+    return;
+  }
+
   const registros=obtenerRegistrosGestionAlumnos();
-  const buscar=normalizarNombreAlumno(adminAlumBuscar.value);
   const mapa=new Map();
   registros.forEach(registro=>{
     (registro.alumnos||[]).forEach(alumno=>{
       const key=normalizarNombreAlumno(alumno.nombre);
-      if(buscar&&!key.includes(buscar))return;
+      if(f.buscar&&!key.includes(f.buscar))return;
       if(!mapa.has(key))mapa.set(key,{nombre:alumno.nombre,periodos:new Set(),niveles:new Set()});
       const item=mapa.get(key);
       item.periodos.add(registro.periodo);
@@ -1031,22 +1059,28 @@ function cargarAlumnosAdministracion(){
   [...mapa.values()].sort((a,b)=>a.nombre.localeCompare(b.nombre,"es")).forEach(item=>{
     const periodos=[...item.periodos].join(", ");
     const niveles=[...item.niveles].join(", ")||"-";
+    const safeName=escaparHtmlAdmin(item.nombre);
+    const encoded=encodeURIComponent(item.nombre);
     const tr=document.createElement("tr");
     tr.innerHTML=`
-      <td><input type="checkbox" class="admin-alumno-check" data-nombre="${item.nombre.replace(/"/g,"&quot;")}" style="width:auto;min-height:auto" onchange="actualizarConteoSeleccionAdmin()"></td>
-      <td><strong>${item.nombre}</strong></td><td>${adminAlumSede.value}</td><td>${adminAlumGrado.value}</td><td>${adminAlumSeccion.value}</td>
-      <td>${periodos}</td><td>${niveles}</td>
-      <td><button class="btn-red" onclick='eliminarAlumnoIndividualAdmin(${JSON.stringify(item.nombre)})'>Eliminar</button></td>`;
+      <td><input type="checkbox" class="admin-alumno-check" data-nombre-encoded="${encoded}" style="width:auto;min-height:auto" onchange="actualizarConteoSeleccionAdmin()"></td>
+      <td><strong>${safeName}</strong></td><td>${escaparHtmlAdmin(f.sede)}</td><td>${escaparHtmlAdmin(f.grado)}</td><td>${escaparHtmlAdmin(f.seccion)}</td>
+      <td>${escaparHtmlAdmin(periodos)}</td><td>${escaparHtmlAdmin(niveles)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-primary" onclick="editarAlumnoAdmin(decodeURIComponent('${encoded}'))">Editar</button>
+        <button class="btn-red" onclick="eliminarAlumnoIndividualAdmin(decodeURIComponent('${encoded}'))">Eliminar</button>
+      </td>`;
     body.appendChild(tr);
   });
 
   if(!body.children.length){
     body.innerHTML='<tr><td colspan="8">No existen alumnos para los filtros seleccionados.</td></tr>';
   }
-  adminAlumTotal.textContent=mapa.size;
-  adminAlumRegistros.textContent=registros.length;
-  adminAlumSeleccionados.textContent="0";
-  adminAlumSeleccionarTodos.checked=false;
+  adminEl("adminAlumTotal").textContent=String(mapa.size);
+  adminEl("adminAlumRegistros").textContent=String(registros.length);
+  adminEl("adminAlumSeleccionados").textContent="0";
+  const seleccionarTodos=adminEl("adminAlumSeleccionarTodos");
+  if(seleccionarTodos){seleccionarTodos.checked=false;seleccionarTodos.indeterminate=false;}
 }
 
 function seleccionarTodosAlumnosAdmin(checked){
@@ -1056,39 +1090,155 @@ function seleccionarTodosAlumnosAdmin(checked){
 
 function actualizarConteoSeleccionAdmin(){
   const checks=[...document.querySelectorAll(".admin-alumno-check")];
-  adminAlumSeleccionados.textContent=checks.filter(x=>x.checked).length;
-  adminAlumSeleccionarTodos.checked=checks.length>0&&checks.every(x=>x.checked);
-  adminAlumSeleccionarTodos.indeterminate=checks.some(x=>x.checked)&&!checks.every(x=>x.checked);
+  const count=checks.filter(x=>x.checked).length;
+  const selected=adminEl("adminAlumSeleccionados");
+  if(selected)selected.textContent=String(count);
+  const all=adminEl("adminAlumSeleccionarTodos");
+  if(all){
+    all.checked=checks.length>0&&checks.every(x=>x.checked);
+    all.indeterminate=checks.some(x=>x.checked)&&!checks.every(x=>x.checked);
+  }
+}
+
+function nombresSeleccionadosAdmin(){
+  return [...document.querySelectorAll(".admin-alumno-check:checked")]
+    .map(x=>decodeURIComponent(x.dataset.nombreEncoded||""))
+    .filter(Boolean);
+}
+
+async function comandoAdminGoogleSheets(action,payload){
+  if(!googleSheetsConfigured())return {ok:false,localOnly:true};
+  try{
+    return await jsonpCommandGoogleSheets(action,payload);
+  }catch(jsonpError){
+    console.warn("JSONP administrativo no disponible, se intentará POST:",jsonpError);
+    return await postToGoogleSheets(Object.assign({action},payload));
+  }
+}
+
+async function editarAlumnoAdmin(nombreActual){
+  if(!validarAdministradorAlumnos())return;
+  const f=obtenerFiltrosGestionAlumnos();
+  if(!f.sede||!f.grado||!f.seccion){alert("Seleccione sede, grado y sección.");return;}
+  const nuevoNombre=prompt("Ingrese el nuevo nombre completo del estudiante:",nombreActual);
+  if(nuevoNombre===null)return;
+  const limpio=String(nuevoNombre).trim().replace(/\s+/g," ");
+  if(!limpio){alert("El nombre no puede estar vacío.");return;}
+  if(normalizarNombreAlumno(limpio)===normalizarNombreAlumno(nombreActual))return;
+
+  const registros=registrosPermitidosPorPerfil().filter(r=>
+    r.sede===f.sede&&r.grado===f.grado&&r.seccion===f.seccion
+  );
+  const existeDuplicado=registros.some(r=>(r.alumnos||[]).some(a=>
+    normalizarNombreAlumno(a.nombre)===normalizarNombreAlumno(limpio)&&
+    normalizarNombreAlumno(a.nombre)!==normalizarNombreAlumno(nombreActual)
+  ));
+  if(existeDuplicado){alert("Ya existe un estudiante con ese nombre en el aula.");return;}
+  if(!confirm(`¿Cambiar el nombre de ${nombreActual} a ${limpio} en todos los bimestres del aula?`))return;
+
+  let actualizados=0;
+  registros.forEach(registro=>{
+    let cambio=false;
+    (registro.alumnos||[]).forEach(a=>{
+      if(normalizarNombreAlumno(a.nombre)===normalizarNombreAlumno(nombreActual)){
+        a.nombre=limpio;
+        cambio=true;
+        actualizados++;
+      }
+    });
+    if(cambio){
+      const key=`notas_${registro.sede}_${registro.grado}_${registro.seccion}_${registro.periodo}`;
+      originalLocalStorageSetItem(key,JSON.stringify(registro));
+      if(claveContextoActual()===key){
+        alumnos=registro.alumnos;
+        renderCargaPreguntas();
+        updateSummary();
+      }
+    }
+  });
+
+  if(!actualizados){alert("No se encontró el estudiante en los registros locales.");return;}
+
+  try{
+    const respuesta=await comandoAdminGoogleSheets("updateStudent",{
+      sede:f.sede,grado:f.grado,seccion:f.seccion,
+      nombreActual,nuevoNombre:limpio
+    });
+    setSheetsStatus(respuesta.opaque?"Actualización enviada a Google Sheets.":"Nombre actualizado en Google Sheets.");
+  }catch(error){
+    console.error(error);
+    setSheetsStatus("El nombre se actualizó localmente, pero Google Sheets reportó: "+error.message,true);
+  }
+
+  const status=adminEl("adminAlumStatus");
+  if(status){
+    status.style.display="block";
+    status.style.background="#eef6ff";
+    status.style.color="#15324b";
+    status.textContent=`Se actualizó el nombre en ${actualizados} registro(s) bimestrales.`;
+  }
+  cargarAlumnosAdministracion();
+  actualizarDashboard();
+  actualizarSeguimiento();
 }
 
 async function eliminarAlumnoIndividualAdmin(nombre){
   if(!validarAdministradorAlumnos())return;
-  const alcanceTexto=adminAlumAlcance.value==="AULA_COMPLETA"?"todos los bimestres del aula":"el bimestre seleccionado";
+  const f=obtenerFiltrosGestionAlumnos();
+  const alcanceTexto=f.alcance==="AULA_COMPLETA"?"todos los bimestres del aula":"el bimestre seleccionado";
   if(!confirm(`¿Eliminar a ${nombre} de ${alcanceTexto}? Esta acción también eliminará sus notas y resultados asociados.`))return;
   await ejecutarEliminacionAlumnosAdmin([nombre]);
 }
 
 async function eliminarAlumnosSeleccionados(){
   if(!validarAdministradorAlumnos())return;
-  const nombres=[...document.querySelectorAll(".admin-alumno-check:checked")].map(x=>x.dataset.nombre);
+  const nombres=nombresSeleccionadosAdmin();
   if(!nombres.length){alert("Seleccione al menos un alumno.");return;}
-  const alcanceTexto=adminAlumAlcance.value==="AULA_COMPLETA"?"todos los bimestres del aula":"el bimestre seleccionado";
+  const f=obtenerFiltrosGestionAlumnos();
+  const alcanceTexto=f.alcance==="AULA_COMPLETA"?"todos los bimestres del aula":"el bimestre seleccionado";
   if(!confirm(`¿Eliminar ${nombres.length} alumno(s) de ${alcanceTexto}? Se eliminarán sus notas y resultados asociados.`))return;
   await ejecutarEliminacionAlumnosAdmin(nombres);
 }
 
 async function ejecutarEliminacionAlumnosAdmin(nombres){
+  if(!validarAdministradorAlumnos())return;
+  const f=obtenerFiltrosGestionAlumnos();
   const registros=obtenerRegistrosGestionAlumnos();
-  if(!registros.length){alert("No existen registros para eliminar.");return;}
+  if(!registros.length){alert("No existen registros para eliminar con los filtros seleccionados.");return;}
   const objetivo=new Set(nombres.map(normalizarNombreAlumno));
   let eliminados=0;
+  const cambios=[];
 
   registros.forEach(registro=>{
     const antes=(registro.alumnos||[]).length;
     registro.alumnos=(registro.alumnos||[]).filter(a=>!objetivo.has(normalizarNombreAlumno(a.nombre)));
-    eliminados+=antes-registro.alumnos.length;
-    const key=`notas_${registro.sede}_${registro.grado}_${registro.seccion}_${registro.periodo}`;
-    localStorage.setItem(key,JSON.stringify(registro));
+    const diferencia=antes-registro.alumnos.length;
+    if(diferencia>0){
+      eliminados+=diferencia;
+      const key=`notas_${registro.sede}_${registro.grado}_${registro.seccion}_${registro.periodo}`;
+      cambios.push({key,registro});
+    }
+  });
+
+  if(!eliminados){alert("No se encontró ningún alumno para eliminar.");return;}
+
+  // Actualiza primero la base remota. Si falla, conserva los datos locales para evitar inconsistencias.
+  try{
+    const respuesta=await comandoAdminGoogleSheets("deleteStudents",{
+      sede:f.sede,grado:f.grado,seccion:f.seccion,periodo:f.periodo,
+      alcance:f.alcance,nombres
+    });
+    setSheetsStatus(respuesta.opaque?"Eliminación enviada a Google Sheets.":"Alumnos eliminados en Google Sheets.");
+  }catch(error){
+    console.error(error);
+    setSheetsStatus("No se pudo eliminar en Google Sheets: "+error.message,true);
+    alert("No se completó la eliminación porque Google Sheets no confirmó la operación. Actualice Code.gs y publique una nueva versión del Web App.");
+    return;
+  }
+
+  cambios.forEach(({key,registro})=>{
+    originalLocalStorageSetItem(key,JSON.stringify(registro));
+    sessionStorage.removeItem("borrador_"+key);
     if(claveContextoActual()===key){
       alumnos=registro.alumnos;
       renderCargaPreguntas();
@@ -1096,28 +1246,13 @@ async function ejecutarEliminacionAlumnosAdmin(nombres){
     }
   });
 
-  try{
-    if(googleSheetsConfigured()){
-      const respuesta=await postToGoogleSheets({
-        action:"deleteStudents",
-        sede:adminAlumSede.value,
-        grado:adminAlumGrado.value,
-        seccion:adminAlumSeccion.value,
-        periodo:adminAlumPeriodo.value,
-        alcance:adminAlumAlcance.value,
-        nombres
-      });
-      setSheetsStatus(respuesta.opaque?"Eliminación enviada a Google Sheets.":"Alumnos eliminados y Google Sheets actualizado.");
-    }
-  }catch(error){
-    console.error(error);
-    setSheetsStatus("La eliminación local fue correcta, pero Google Sheets reportó: "+error.message,true);
+  const status=adminEl("adminAlumStatus");
+  if(status){
+    status.style.display="block";
+    status.style.background="#eef6ff";
+    status.style.color="#15324b";
+    status.textContent=`Se eliminaron ${eliminados} registro(s) de alumno. La lista, notas, resultados y estadísticas fueron actualizadas.`;
   }
-
-  adminAlumStatus.style.display="block";
-  adminAlumStatus.style.background="#eef6ff";
-  adminAlumStatus.style.color="#15324b";
-  adminAlumStatus.textContent=`Se eliminaron ${eliminados} registro(s) de alumno. La lista, notas, resultados y estadísticas fueron actualizadas.`;
   cargarAlumnosAdministracion();
   actualizarDashboard();
   actualizarSeguimiento();
@@ -1381,6 +1516,40 @@ function jsonpGoogleSheets(action, timeoutMs=25000){
     script.onerror=()=>cleanup(new Error("El navegador bloqueó la respuesta JSONP o el despliegue solicita iniciar sesión."));
     script.src=GOOGLE_SHEETS_WEB_APP_URL+
       "?action="+encodeURIComponent(action)+
+      "&callback="+encodeURIComponent(callbackName)+
+      "&_="+Date.now();
+    document.head.appendChild(script);
+  });
+}
+
+
+function jsonpCommandGoogleSheets(action,payload={},timeoutMs=30000){
+  return new Promise((resolve,reject)=>{
+    if(!googleSheetsConfigured()){
+      reject(new Error("URL de Google Apps Script no configurada."));
+      return;
+    }
+    const callbackName="__gsAdminCallback_"+Date.now()+"_"+Math.random().toString(36).slice(2);
+    const script=document.createElement("script");
+    let finished=false;
+    const timer=setTimeout(()=>cleanup(new Error("El Web App no respondió a la operación administrativa.")),timeoutMs);
+    function cleanup(error,data){
+      if(finished)return;
+      finished=true;
+      clearTimeout(timer);
+      try{delete window[callbackName]}catch(_){window[callbackName]=undefined}
+      if(script.parentNode)script.parentNode.removeChild(script);
+      if(error)reject(error);else resolve(data);
+    }
+    window[callbackName]=data=>{
+      if(!data||data.ok===false)cleanup(new Error(data?.error||"Google Sheets rechazó la operación."));
+      else cleanup(null,data);
+    };
+    script.async=true;
+    script.onerror=()=>cleanup(new Error("No se pudo ejecutar la operación en Google Sheets."));
+    script.src=GOOGLE_SHEETS_WEB_APP_URL+
+      "?action="+encodeURIComponent(action)+
+      "&payload="+encodeURIComponent(JSON.stringify(payload))+
       "&callback="+encodeURIComponent(callbackName)+
       "&_="+Date.now();
     document.head.appendChild(script);

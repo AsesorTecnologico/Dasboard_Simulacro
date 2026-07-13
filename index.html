@@ -31,6 +31,7 @@
   <button class="tab active" data-view="dashboard">Dashboard</button>
   <button class="tab" data-view="carga">Carga de notas</button>
   <button class="tab" data-view="seguimiento">Alertas y seguimiento</button>
+  <button class="tab admin-only" data-view="gestionAlumnos">Gestión de alumnos</button>
   <button class="tab admin-only" data-view="preguntas">Configuración de preguntas</button>
   <button class="tab admin-only" data-view="rangos">Rangos de logro</button>
   <button class="tab admin-only" data-view="usuarios">Usuarios</button>
@@ -129,6 +130,56 @@
   </div>
 </section>
 
+
+
+<section id="gestionAlumnos" class="view">
+  <div class="panel">
+    <h3>Gestión administrativa de alumnos</h3>
+    <p class="note">Esta función está disponible únicamente para el Administrador. Permite editar nombres y eliminar alumnos de forma individual o masiva sin afectar otras aulas.</p>
+    <div class="grid">
+      <div><label>Sede</label><select id="adminAlumSede" onchange="cargarAlumnosAdministracion()"></select></div>
+      <div><label>Grado</label><select id="adminAlumGrado" onchange="cargarAlumnosAdministracion()">
+        <option value="">Seleccione grado</option>
+        <option>1.º Secundaria</option><option>2.º Secundaria</option><option>3.º Secundaria</option>
+        <option>4.º Secundaria</option><option>5.º Secundaria</option><option>4.º Pre</option><option>5.º Pre</option>
+      </select></div>
+      <div><label>Sección</label><select id="adminAlumSeccion" onchange="cargarAlumnosAdministracion()">
+        <option value="">Seleccione sección</option><option>A</option><option>B</option><option>C</option><option>D</option><option>E</option><option>F</option>
+      </select></div>
+      <div><label>Bimestre</label><select id="adminAlumPeriodo" onchange="cargarAlumnosAdministracion()">
+        <option>1.er Bimestre</option><option>2.º Bimestre</option><option>3.er Bimestre</option><option>4.º Bimestre</option>
+      </select></div>
+      <div><label>Alcance de eliminación</label><select id="adminAlumAlcance" onchange="cargarAlumnosAdministracion()">
+        <option value="PERIODO">Solo el bimestre seleccionado</option>
+        <option value="AULA_COMPLETA">Todos los bimestres del aula</option>
+      </select></div>
+      <div><label>Buscar alumno</label><input id="adminAlumBuscar" placeholder="Escriba nombre o apellido" oninput="cargarAlumnosAdministracion()"></div>
+    </div>
+    <div class="actions">
+      <button class="btn-gray" onclick="cargarAlumnosAdministracion()">Actualizar lista</button>
+      <button class="btn-red" onclick="eliminarAlumnosSeleccionados()">Eliminar seleccionados</button>
+    </div>
+    <div id="adminAlumStatus" class="status"></div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><strong id="adminAlumTotal">0</strong><small>Alumnos encontrados</small></div>
+    <div class="card"><strong id="adminAlumSeleccionados">0</strong><small>Seleccionados</small></div>
+    <div class="card"><strong id="adminAlumRegistros">0</strong><small>Registros afectados</small></div>
+  </div>
+
+  <div class="panel">
+    <div class="table-wrap" style="max-height:none">
+      <table class="compact-table">
+        <thead><tr>
+          <th><input id="adminAlumSeleccionarTodos" type="checkbox" style="width:auto;min-height:auto" onchange="seleccionarTodosAlumnosAdmin(this.checked)"></th>
+          <th>Alumno</th><th>Sede</th><th>Grado</th><th>Sección</th><th>Bimestre(s)</th><th>Nivel</th><th>Acciones</th>
+        </tr></thead>
+        <tbody id="adminAlumBody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
 
 <section id="seguimiento" class="view">
   <div class="panel">

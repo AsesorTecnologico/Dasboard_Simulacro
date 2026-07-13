@@ -32,20 +32,16 @@ NOTA
 Abrir index.html directamente con file:// puede limitar solicitudes fetch en algunos navegadores.
 
 
-NOTA: Esta version no carga ejemplos visuales ni datos de demostracion. Los modulos inician sin registros precargados.
+GESTION DE ALUMNOS (SOLO ADMINISTRADOR)
+- Nuevo modulo Gestion de alumnos.
+- Eliminacion individual o masiva.
+- Alcance: bimestre seleccionado o todos los bimestres del aula.
+- Elimina lista, notas, resultados y actualiza estadisticas.
+- Requiere volver a publicar Code.gs como nueva version del Web App.
 
 
-CONEXION ACTIVA CONFIGURADA
----------------------------
-URL Web App:
-https://script.google.com/macros/s/AKfycbxFXmuRuyXFKMMurZ3_wzkyjt6bRb_pWhBgvzDbhA6rgUYeCFHoxNfWc-N2D9FZF6C7/exec
-
-IMPORTANTE:
-1. Pegue el Code.gs actualizado en Apps Script.
-2. Ejecute configurarSistema una vez y acepte permisos.
-3. Vuelva a implementar la aplicación web usando una NUEVA VERSION.
-4. Ejecutar como: usted.
-5. Acceso: cualquier usuario con el enlace, o todos los usuarios de su organización que usarán el sistema.
-6. Abra index.html y pulse Probar conexión.
-
-La lectura usa JSONP para funcionar incluso desde file://. El guardado usa POST y tiene respaldo no-cors para navegadores que bloqueen CORS.
+GESTION ADMINISTRATIVA DE ALUMNOS
+- Solo el perfil Administrador puede editar o eliminar alumnos.
+- La edición cambia el nombre en todos los bimestres del aula.
+- La eliminación puede aplicarse al bimestre seleccionado o a todos los bimestres del aula.
+- Después de reemplazar Code.gs, publique una NUEVA VERSION del Web App.

@@ -66,6 +66,14 @@ function doGet(e) {
     if (action === 'snapshot') data = buildSnapshot();
     else if (action === 'ping') data = probarConexion();
     else if (action === 'setup') data = configurarSistema();
+    else if (action === 'deleteStudents') {
+      const payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+      data = Object.assign({ok:true}, deleteStudentsFromSystem(payload));
+    }
+    else if (action === 'updateStudent') {
+      const payload = JSON.parse((e.parameter && e.parameter.payload) || '{}');
+      data = Object.assign({ok:true}, updateStudentInSystem(payload));
+    }
     else data = {ok: false, error: 'Accion GET no reconocida'};
 
     const callback = e && e.parameter && e.parameter.callback;
@@ -94,6 +102,14 @@ function doPost(e) {
     if (body.action === 'deleteItem') {
       deleteSystemItem(body.key);
       return jsonResponse({ok: true, deleted: body.key});
+    }
+    if (body.action === 'deleteStudents') {
+      const result = deleteStudentsFromSystem(body);
+      return jsonResponse(Object.assign({ok:true}, result));
+    }
+    if (body.action === 'updateStudent') {
+      const result = updateStudentInSystem(body);
+      return jsonResponse(Object.assign({ok:true}, result));
     }
     return jsonResponse({ok: false, error: 'Accion POST no reconocida'});
   } catch (err) {
@@ -302,4 +318,145 @@ function buildSnapshot() {
   const items = {};
   values.slice(1).forEach(r => { if (r[0]) items[String(r[0])] = String(r[2]); });
   return {ok:true, items:items, timestamp:new Date().toISOString()};
+}
+
+
+/** Elimina alumnos, notas y resultados desde el perfil Administrador. */
+function deleteStudentsFromSystem(body) {
+  const sede = String(body.sede || '');
+  const grado = String(body.grado || '');
+  const seccion = String(body.seccion || '');
+  const periodo = String(body.periodo || '');
+  const alcance = String(body.alcance || 'PERIODO');
+  const nombres = (body.nombres || []).map(normalizeStudentName_);
+  if (!sede || !grado || !seccion || !nombres.length) throw new Error('Datos insuficientes para eliminar alumnos.');
+
+  const nombreSet = {};
+  nombres.forEach(n => nombreSet[n] = true);
+  let notas = 0, resultados = 0, estudiantes = 0, jsonActualizados = 0;
+
+  notas += deleteStudentRows_(getOrCreateSheet(SHEETS.notas, []), sede, grado, seccion, periodo, alcance, nombreSet, 2, 3, 4, 5, 7);
+  resultados += deleteStudentRows_(getOrCreateSheet(SHEETS.resultados, []), sede, grado, seccion, periodo, alcance, nombreSet, 2, 3, 4, 5, 7);
+
+  if (alcance === 'AULA_COMPLETA') {
+    estudiantes += deleteStudentRows_(getOrCreateSheet(SHEETS.estudiantes, []), sede, grado, seccion, '', alcance, nombreSet, 2, 3, 4, 0, 5);
+  } else {
+    estudiantes += removeStudentsWithoutResults_(sede, grado, seccion, nombreSet);
+  }
+
+  const shJson = getOrCreateSheet(SHEETS.json, ['CLAVE','TIPO','JSON','FECHA_ACTUALIZACION']);
+  if (shJson.getLastRow() > 1) {
+    const data = shJson.getRange(2,1,shJson.getLastRow()-1,4).getValues();
+    data.forEach((row, index) => {
+      const key = String(row[0] || '');
+      if (key.indexOf('notas_') !== 0) return;
+      try {
+        const registro = JSON.parse(String(row[2] || '{}'));
+        const coincide = registro.sede === sede && registro.grado === grado && registro.seccion === seccion &&
+          (alcance === 'AULA_COMPLETA' || registro.periodo === periodo);
+        if (!coincide) return;
+        registro.alumnos = (registro.alumnos || []).filter(a => !nombreSet[normalizeStudentName_(a.nombre)]);
+        shJson.getRange(index + 2, 3, 1, 2).setValues([[JSON.stringify(registro), new Date()]]);
+        jsonActualizados++;
+      } catch (_) {}
+    });
+  }
+
+  return {deletedStudents: estudiantes, deletedNotes: notas, deletedResults: resultados, updatedRecords: jsonActualizados};
+}
+
+
+/** Actualiza el nombre de un alumno en todos los bimestres del aula. */
+function updateStudentInSystem(body) {
+  const sede = String(body.sede || '');
+  const grado = String(body.grado || '');
+  const seccion = String(body.seccion || '');
+  const nombreActual = String(body.nombreActual || '').trim();
+  const nuevoNombre = String(body.nuevoNombre || '').trim();
+  if (!sede || !grado || !seccion || !nombreActual || !nuevoNombre) {
+    throw new Error('Datos insuficientes para actualizar el alumno.');
+  }
+
+  const oldNorm = normalizeStudentName_(nombreActual);
+  let estudiantes = 0, notas = 0, resultados = 0, jsonActualizados = 0;
+  estudiantes += renameStudentRows_(getOrCreateSheet(SHEETS.estudiantes, []), sede, grado, seccion, oldNorm, nuevoNombre, 2,3,4,5,1);
+  notas += renameStudentRows_(getOrCreateSheet(SHEETS.notas, []), sede, grado, seccion, oldNorm, nuevoNombre, 2,3,4,7,6);
+  resultados += renameStudentRows_(getOrCreateSheet(SHEETS.resultados, []), sede, grado, seccion, oldNorm, nuevoNombre, 2,3,4,7,6);
+
+  const shJson = getOrCreateSheet(SHEETS.json, ['CLAVE','TIPO','JSON','FECHA_ACTUALIZACION']);
+  if (shJson.getLastRow() > 1) {
+    const data = shJson.getRange(2,1,shJson.getLastRow()-1,4).getValues();
+    data.forEach((row,index)=>{
+      const key=String(row[0]||'');
+      if (key.indexOf('notas_')!==0) return;
+      try {
+        const registro=JSON.parse(String(row[2]||'{}'));
+        if (registro.sede!==sede || registro.grado!==grado || registro.seccion!==seccion) return;
+        let changed=false;
+        (registro.alumnos||[]).forEach(a=>{
+          if (normalizeStudentName_(a.nombre)===oldNorm) { a.nombre=nuevoNombre; changed=true; }
+        });
+        if (changed) {
+          shJson.getRange(index+2,3,1,2).setValues([[JSON.stringify(registro),new Date()]]);
+          jsonActualizados++;
+        }
+      } catch (_) {}
+    });
+  }
+  return {updatedStudents:estudiantes,updatedNotes:notas,updatedResults:resultados,updatedRecords:jsonActualizados};
+}
+
+function renameStudentRows_(sh,sede,grado,seccion,oldNorm,nuevoNombre,colSede,colGrado,colSeccion,colNombre,colId){
+  if (!sh || sh.getLastRow()<2) return 0;
+  const range=sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn());
+  const values=range.getValues();
+  let count=0;
+  for (let i=0;i<values.length;i++) {
+    const row=values[i];
+    if (String(row[colSede-1])!==sede || String(row[colGrado-1])!==grado || String(row[colSeccion-1])!==seccion) continue;
+    if (normalizeStudentName_(row[colNombre-1])!==oldNorm) continue;
+    row[colNombre-1]=nuevoNombre;
+    if (colId) row[colId-1]=makeStudentId(sede,grado,seccion,nuevoNombre);
+    count++;
+  }
+  if (count) range.setValues(values);
+  return count;
+}
+
+function normalizeStudentName_(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function deleteStudentRows_(sh, sede, grado, seccion, periodo, alcance, nombreSet, colSede, colGrado, colSeccion, colPeriodo, colNombre) {
+  if (!sh || sh.getLastRow() < 2) return 0;
+  const values = sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()).getValues();
+  let count = 0;
+  for (let i = values.length - 1; i >= 0; i--) {
+    const row = values[i];
+    const coincideContexto = String(row[colSede-1]) === sede && String(row[colGrado-1]) === grado && String(row[colSeccion-1]) === seccion;
+    const coincidePeriodo = alcance === 'AULA_COMPLETA' || !colPeriodo || String(row[colPeriodo-1]) === periodo;
+    const coincideNombre = nombreSet[normalizeStudentName_(row[colNombre-1])];
+    if (coincideContexto && coincidePeriodo && coincideNombre) {
+      sh.deleteRow(i+2);
+      count++;
+    }
+  }
+  return count;
+}
+
+function removeStudentsWithoutResults_(sede, grado, seccion, nombreSet) {
+  const shR = getOrCreateSheet(SHEETS.resultados, []);
+  const resultData = shR.getLastRow() > 1 ? shR.getRange(2,1,shR.getLastRow()-1,shR.getLastColumn()).getValues() : [];
+  const shE = getOrCreateSheet(SHEETS.estudiantes, []);
+  if (shE.getLastRow() < 2) return 0;
+  const studentData = shE.getRange(2,1,shE.getLastRow()-1,shE.getLastColumn()).getValues();
+  let count = 0;
+  for (let i=studentData.length-1;i>=0;i--) {
+    const row = studentData[i];
+    const nombre = normalizeStudentName_(row[4]);
+    if (String(row[1]) !== sede || String(row[2]) !== grado || String(row[3]) !== seccion || !nombreSet[nombre]) continue;
+    const sigueConResultados = resultData.some(r => String(r[1])===sede && String(r[2])===grado && String(r[3])===seccion && normalizeStudentName_(r[6])===nombre);
+    if (!sigueConResultados) { shE.deleteRow(i+2); count++; }
+  }
+  return count;
 }
