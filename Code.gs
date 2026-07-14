@@ -99,6 +99,10 @@ function doPost(e) {
     }else if(body.action==='bulkSync'){
       Object.keys(body.items||{}).forEach(key=>saveLocalStorageItem(key,body.items[key]));
       result={ok:true,synced:Object.keys(body.items||{}).length};
+    }else if(body.action==='bulkStudents'){
+      const items=body.items||{};
+      Object.keys(items).forEach(key=>saveLocalStorageItem(key,items[key]));
+      result={ok:true,synced:Object.keys(items).length,action:'bulkStudents'};
     }else if(body.action==='deleteItem'){
       deleteSystemItem(body.key);
       result={ok:true,deleted:body.key};

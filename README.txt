@@ -39,3 +39,15 @@ Hojas compatibles: Usuarios, Preguntas o Configuracion_Preguntas, Rangos_Grado, 
 Despues de reemplazar Code.gs debe publicar una NUEVA VERSION del Web App.
 Use "Cargar desde hoja" para reemplazar el estado local con la informacion de Google Sheets.
 Use "Enviar cambios" para escribir cambios locales a Google Sheets.
+
+
+CORRECCION DE CARGA MASIVA
+---------------------------
+- La carga masiva ahora guarda cada contexto en localStorage y lo agrega explícitamente a la cola de sincronización.
+- Espera a que termine cualquier sincronización anterior antes de enviar los nuevos registros.
+- Confirma cada lista mediante hash antes de mostrar que fue sincronizada.
+- Permite descargar las filas con observaciones.
+- Admite celdas de Excel con texto, fórmulas, resultados, texto enriquecido e hipervínculos.
+- Si la conexión falla, los cambios quedan pendientes y no se pierden.
+
+Después de reemplazar Code.gs, publique una NUEVA VERSION de la aplicación web.

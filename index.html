@@ -210,12 +210,14 @@
       </div>
     </div>
     <div class="actions">
-      <button class="btn-green" onclick="procesarCargaMasivaAlumnos()">Guardar estudiantes</button>
+      <button id="bulkStudentsSaveButton" class="btn-green" onclick="procesarCargaMasivaAlumnos()">Guardar estudiantes</button>
       <button class="btn-gray" onclick="limpiarCargaMasivaAlumnos()">Limpiar vista previa</button>
+      <button class="btn-amber" onclick="descargarErroresCargaMasiva()">Descargar observaciones</button>
       <button class="btn-primary" onclick="descargarPlantillaCargaMasivaCSV()">Descargar plantilla CSV</button>
       <a class="btn-link" href="plantilla_carga_masiva_alumnos.xlsx" download>Descargar plantilla Excel</a>
     </div>
     <div id="bulkStudentsStatus" class="status"></div>
+    <div id="bulkStudentsProgress" class="note" style="display:none;margin-top:8px"></div>
   </div>
 
   <div class="panel">

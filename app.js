@@ -1099,10 +1099,40 @@ function parseCsvCargaMasiva(text){
   });
 }
 
+
+function valorCeldaExcelCargaMasiva(value){
+  if(value===null||value===undefined)return "";
+  if(value instanceof Date)return value.toISOString();
+  if(typeof value!=="object")return value;
+  if("text" in value)return value.text;
+  if("result" in value)return value.result;
+  if(Array.isArray(value.richText))return value.richText.map(x=>x.text||"").join("");
+  if("hyperlink" in value)return value.text||value.hyperlink||"";
+  return String(value);
+}
+
+function setProgresoCargaMasiva(message,visible=true){
+  const el=bulkEl("bulkStudentsProgress");
+  if(!el)return;
+  el.style.display=visible?"block":"none";
+  el.textContent=message||"";
+}
+
+function esperarSincronizacionDisponible(timeoutMs=30000){
+  return new Promise((resolve,reject)=>{
+    const inicio=Date.now();
+    const timer=setInterval(()=>{
+      if(!syncFlushing){clearInterval(timer);resolve(true);return;}
+      if(Date.now()-inicio>timeoutMs){clearInterval(timer);reject(new Error("La sincronización anterior no terminó a tiempo."));}
+    },200);
+  });
+}
+
 async function leerArchivoCargaMasivaAlumnos(event){
   if(!currentUser||currentUser.perfil!=="admin"){alert("Esta opción es exclusiva del Administrador.");return;}
   const file=event.target.files?.[0];if(!file)return;
   try{
+    setProgresoCargaMasiva("Leyendo y validando el archivo...");
     let matrix=[];
     if(/\.csv$/i.test(file.name)){
       matrix=parseCsvCargaMasiva(await file.text());
@@ -1111,13 +1141,15 @@ async function leerArchivoCargaMasivaAlumnos(event){
       const workbook=new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer);
       const sheet=workbook.worksheets[0];
-      sheet.eachRow({includeEmpty:false},row=>matrix.push(row.values.slice(1).map(v=>v&&typeof v==="object"&&"text" in v?v.text:v)));
+      sheet.eachRow({includeEmpty:false},row=>matrix.push(row.values.slice(1).map(valorCeldaExcelCargaMasiva)));
     }
     bulkStudentsRows=convertirMatrizCargaMasiva(matrix);
     renderVistaPreviaCargaMasiva();
-    mostrarEstadoCargaMasiva(`Archivo leído: ${bulkStudentsRows.length} fila(s).`,false);
+    const validas=bulkStudentsRows.filter(r=>r.valido).length;
+    mostrarEstadoCargaMasiva(`Archivo leído: ${bulkStudentsRows.length} fila(s); ${validas} válida(s).`,false);
+    setProgresoCargaMasiva("Archivo listo para guardar.");
   }catch(error){
-    console.error(error);bulkStudentsRows=[];renderVistaPreviaCargaMasiva();mostrarEstadoCargaMasiva(error.message||"No se pudo leer el archivo.",true);
+    console.error(error);bulkStudentsRows=[];renderVistaPreviaCargaMasiva();mostrarEstadoCargaMasiva(error.message||"No se pudo leer el archivo.",true);setProgresoCargaMasiva("",false);
   }
 }
 
@@ -1161,55 +1193,125 @@ function descargarPlantillaCargaMasivaCSV(){
   const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="plantilla_carga_masiva_alumnos.csv";a.click();URL.revokeObjectURL(url);
 }
 
+
+function descargarErroresCargaMasiva(){
+  const rows=bulkStudentsRows.filter(r=>!r.valido);
+  if(!rows.length){alert("No existen filas con observaciones.");return;}
+  const data=[["FILA","SEDE","GRADO","SECCION","PERIODO","NOMBRE_COMPLETO","OBSERVACIONES"],
+    ...rows.map(r=>[r.fila,r.sede,r.grado,r.seccion,r.periodo,r.nombre,r.errores.join("; ")])];
+  const csv=data.map(row=>row.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(";")).join("\n");
+  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob),a=document.createElement("a");
+  a.href=url;a.download="observaciones_carga_masiva.csv";a.click();URL.revokeObjectURL(url);
+}
+
 async function procesarCargaMasivaAlumnos(){
-  if(!currentUser||currentUser.perfil!=="admin"){alert("Esta opción es exclusiva del Administrador.");return;}
+  if(!currentUser||currentUser.perfil!=="admin"){
+    alert("Esta opción es exclusiva del Administrador.");
+    return;
+  }
+
+  const boton=bulkEl("bulkStudentsSaveButton");
   const validas=bulkStudentsRows.filter(r=>r.valido);
-  if(!validas.length){mostrarEstadoCargaMasiva("No existen filas válidas para guardar.",true);return;}
+  if(!validas.length){
+    mostrarEstadoCargaMasiva("No existen filas válidas para guardar. Revise las observaciones.",true);
+    return;
+  }
+
   const invalidas=bulkStudentsRows.length-validas.length;
-  if(invalidas&&!confirm(`Hay ${invalidas} fila(s) con observaciones. ¿Desea guardar únicamente las filas válidas?`))return;
+  if(invalidas&&!confirm(`Hay ${invalidas} fila(s) con observaciones. ¿Desea guardar únicamente las ${validas.length} filas válidas?`))return;
+
   const modo=bulkEl("bulkStudentsMode")?.value||"AGREGAR";
-  if(modo==="REEMPLAZAR"&&!confirm("El modo Reemplazar sustituirá la lista de los contextos incluidos en el archivo. Las notas de alumnos no incluidos dejarán de estar disponibles en esos contextos. ¿Continuar?"))return;
-  const periodos=["1.er Bimestre","2.º Bimestre","3.er Bimestre","4.º Bimestre"];
-  const grupos=new Map();
-  validas.forEach(r=>{
-    const ps=r.periodo==="TODOS"?periodos:[r.periodo];
-    ps.forEach(p=>{
-      const key=`notas_${r.sede}_${r.grado}_${r.seccion}_${p}`;
-      if(!grupos.has(key))grupos.set(key,{sede:r.sede,grado:r.grado,seccion:r.seccion,periodo:p,nombres:[]});
-      grupos.get(key).nombres.push(r.nombre);
-    });
-  });
-  const syncItems={};let agregados=0,duplicados=0,contextos=0;
-  grupos.forEach((g,key)=>{
-    const existente=JSON.parse(localStorage.getItem(key)||"null")||{sede:g.sede,grado:g.grado,seccion:g.seccion,periodo:g.periodo,alumnos:[],fecha:new Date().toISOString()};
-    const prev=new Map((existente.alumnos||[]).map(a=>[normalizarNombreAlumno(a.nombre),a]));
-    const nuevos=[];const vistos=new Set();
-    g.nombres.forEach(nombre=>{
-      const norm=normalizarNombreAlumno(nombre);if(vistos.has(norm)){duplicados++;return;}vistos.add(norm);
-      if(prev.has(norm)){nuevos.push(prev.get(norm));duplicados++;}else{nuevos.push({nombre,respuestas:{},total:0,promedio:0,nivelFinal:""});agregados++;}
-    });
-    if(modo==="AGREGAR"){
-      prev.forEach((a,norm)=>{if(!vistos.has(norm))nuevos.push(a);});
-    }
-    existente.alumnos=nuevos;existente.fecha=new Date().toISOString();
-    localStorage.setItem(key,JSON.stringify(existente));
-    syncItems[key]=JSON.stringify(existente);contextos++;
-  });
+  if(modo==="REEMPLAZAR"&&!confirm("El modo Reemplazar sustituirá la lista de cada aula y bimestre incluidos. ¿Desea continuar?"))return;
+
+  if(boton){boton.disabled=true;boton.textContent="Guardando...";}
+  setProgresoCargaMasiva("Preparando listas por sede, grado, sección y bimestre...");
+
   try{
-    let synced=true;
-    if(googleSheetsConfigured()){
-      setSheetsStatus("Guardando carga masiva en Google Sheets...");
-      synced=await flushSyncQueue();
+    const periodos=["1.er Bimestre","2.º Bimestre","3.er Bimestre","4.º Bimestre"];
+    const grupos=new Map();
+
+    validas.forEach(r=>{
+      const periodosFila=r.periodo==="TODOS"?periodos:[r.periodo];
+      periodosFila.forEach(p=>{
+        const key=`notas_${r.sede}_${r.grado}_${r.seccion}_${p}`;
+        if(!grupos.has(key))grupos.set(key,{key,sede:r.sede,grado:r.grado,seccion:r.seccion,periodo:p,nombres:[]});
+        grupos.get(key).nombres.push(r.nombre);
+      });
+    });
+
+    const cambios=[];
+    let agregados=0,duplicados=0,contextos=0;
+
+    for(const g of grupos.values()){
+      let existente;
+      try{existente=JSON.parse(nativeStorageGet(g.key)||"null");}catch{existente=null;}
+      if(!existente)existente={sede:g.sede,grado:g.grado,seccion:g.seccion,periodo:g.periodo,alumnos:[],fecha:new Date().toISOString()};
+
+      const anteriores=new Map((existente.alumnos||[]).map(a=>[normalizarNombreAlumno(a.nombre),a]));
+      const nuevos=[];
+      const vistos=new Set();
+
+      g.nombres.forEach(nombre=>{
+        const normalizado=normalizarNombreAlumno(nombre);
+        if(!normalizado||vistos.has(normalizado)){duplicados++;return;}
+        vistos.add(normalizado);
+        if(anteriores.has(normalizado)){
+          nuevos.push(anteriores.get(normalizado));
+          duplicados++;
+        }else{
+          nuevos.push({nombre,respuestas:{},total:0,promedio:0,nivelFinal:""});
+          agregados++;
+        }
+      });
+
+      if(modo==="AGREGAR"){
+        anteriores.forEach((alumno,nombreNormalizado)=>{
+          if(!vistos.has(nombreNormalizado))nuevos.push(alumno);
+        });
+      }
+
+      existente.sede=g.sede;
+      existente.grado=g.grado;
+      existente.seccion=g.seccion;
+      existente.periodo=g.periodo;
+      existente.alumnos=nuevos;
+      existente.fecha=new Date().toISOString();
+
+      const serialized=JSON.stringify(existente);
+      nativeStorageSetItem.call(localStorage,g.key,serialized);
+      enqueueSheetsSync(g.key,serialized,"set");
+      cambios.push(g.key);
+      contextos++;
     }
-    actualizarDashboard();actualizarSeguimiento();cargarAlumnosAdministracion();
-    mostrarEstadoCargaMasiva(
-      synced
-        ? `Proceso completado y sincronizado: ${agregados} estudiante(s) nuevo(s), ${duplicados} coincidencia(s), ${contextos} lista(s) actualizada(s).`
-        : `Proceso guardado localmente: ${agregados} estudiante(s) nuevo(s), ${duplicados} coincidencia(s), ${contextos} lista(s). La sincronización se reintentará automáticamente.`,
-      !synced
-    );
+
+    actualizarDashboard();
+    actualizarSeguimiento();
+    cargarAlumnosAdministracion();
+
+    if(!googleSheetsConfigured()){
+      mostrarEstadoCargaMasiva(`Carga local completada: ${agregados} nuevo(s), ${duplicados} coincidencia(s), ${contextos} lista(s). Configure Google Sheets para sincronizar.`,true);
+      return;
+    }
+
+    setProgresoCargaMasiva(`Enviando ${cambios.length} lista(s) a Google Sheets...`);
+    await esperarSincronizacionDisponible();
+    const sincronizado=await flushSyncQueue();
+    const pendientes=cambios.filter(key=>Boolean(readSyncQueue()[key]));
+
+    if(sincronizado&&pendientes.length===0){
+      mostrarEstadoCargaMasiva(`Carga completada y verificada en Google Sheets: ${agregados} estudiante(s) nuevo(s), ${duplicados} coincidencia(s), ${contextos} lista(s) actualizada(s).`,false);
+      setProgresoCargaMasiva("Sincronización confirmada con Google Sheets.");
+    }else{
+      mostrarEstadoCargaMasiva(`La carga local se completó, pero ${pendientes.length} lista(s) siguen pendientes de sincronización. Use “Enviar cambios” o revise la implementación del Web App.`,true);
+      setProgresoCargaMasiva("Los cambios pendientes permanecen en la cola y no se perderán.");
+    }
   }catch(error){
-    console.error(error);mostrarEstadoCargaMasiva("Los datos se guardaron localmente, pero Google Sheets reportó: "+error.message,true);
+    console.error("Error en carga masiva",error);
+    mostrarEstadoCargaMasiva("No se pudo completar la carga masiva: "+(error.message||error),true);
+    setProgresoCargaMasiva("Revise el archivo y la conexión con Google Sheets.");
+  }finally{
+    if(boton){boton.disabled=false;boton.textContent="Guardar estudiantes";}
   }
 }
 
