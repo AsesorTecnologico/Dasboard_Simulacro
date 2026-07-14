@@ -51,3 +51,13 @@ CORRECCION DE CARGA MASIVA
 - Si la conexión falla, los cambios quedan pendientes y no se pierden.
 
 Después de reemplazar Code.gs, publique una NUEVA VERSION de la aplicación web.
+
+CORRECCION DE ACCESO POR PERFILES
+---------------------------------
+- El inicio de sesion ya no queda bloqueado esperando Google Sheets.
+- Los usuarios de la hoja Usuarios se normalizan como admin, general o sede.
+- Administrador Academico conserva internamente el perfil general.
+- El nombre de usuario se compara sin distinguir mayusculas/minusculas.
+- La contrasena se valida eliminando espacios accidentales al inicio o final.
+- Si Google Sheets no responde, se permite ingresar con usuarios locales y sincronizar despues.
+- La carga masiva sigue disponible solo para el perfil Administrador.

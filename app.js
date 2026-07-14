@@ -10,35 +10,97 @@ function defaultUsers(){return[
  {usuario:"belisario",password:"sede123",perfil:"sede",sede:"BELISARIO"},
  {usuario:"bellavista",password:"sede123",perfil:"sede",sede:"BELLAVISTA"},
  {usuario:"ingenieros",password:"sede123",perfil:"sede",sede:"INGENIEROS"}]}
-function getUsers(){return JSON.parse(localStorage.getItem("usuariosSistema")||"null")||defaultUsers()}
+function normalizarPerfilUsuario(perfil){
+  const raw=String(perfil||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+  if(raw.includes("academ")||raw==="general")return "general";
+  if(raw.includes("admin"))return "admin";
+  return "sede";
+}
+
+function normalizarUsuarioRegistro(usuario){
+  if(!usuario||typeof usuario!=="object")return null;
+  const nombre=String(usuario.usuario??usuario.USUARIO??"").trim();
+  const password=String(usuario.password??usuario.contrasena??usuario.CONTRASENA??usuario["CONTRASEÑA"]??"").trim();
+  if(!nombre||!password)return null;
+  const perfil=normalizarPerfilUsuario(usuario.perfil??usuario.PERFIL);
+  const sede=perfil==="sede"?String(usuario.sede??usuario.SEDE??"").trim().toUpperCase():"TODAS";
+  return {usuario:nombre,password,perfil,sede:sede||"TODAS"};
+}
+
+function getUsers(){
+  let guardados=[];
+  try{
+    const parsed=JSON.parse(localStorage.getItem("usuariosSistema")||"[]");
+    if(Array.isArray(parsed))guardados=parsed.map(normalizarUsuarioRegistro).filter(Boolean);
+  }catch(error){
+    console.warn("No se pudo leer usuariosSistema:",error);
+  }
+  const base=defaultUsers().map(normalizarUsuarioRegistro).filter(Boolean);
+  const mapa=new Map();
+  [...base,...guardados].forEach(u=>mapa.set(u.usuario.toLowerCase(),u));
+  return [...mapa.values()];
+}
+
+function esperarConLimite(promesa,milisegundos){
+  return Promise.race([
+    Promise.resolve(promesa).catch(()=>false),
+    new Promise(resolve=>setTimeout(()=>resolve(false),milisegundos))
+  ]);
+}
+
 async function login(){
   try{
-    await sheetsInitialLoadPromise;
-    const u=loginUser.value.trim();
-    const p=loginPassword.value;
-    const usuarios=getUsers();
-    const encontrado=usuarios.find(x=>x.usuario===u&&x.password===p);
+    loginError.style.display="none";
+    const boton=document.querySelector('#loginScreen button[onclick="login()"]');
+    if(boton){boton.disabled=true;boton.textContent="Validando...";}
+
+    // La conexión con la hoja nunca debe bloquear el acceso.
+    await esperarConLimite(sheetsInitialLoadPromise,5000);
+
+    const usuarioIngresado=String(loginUser.value||"").trim().toLowerCase();
+    const claveIngresada=String(loginPassword.value||"").trim();
+    let usuarios=getUsers();
+    let encontrado=usuarios.find(x=>x.usuario.toLowerCase()===usuarioIngresado&&String(x.password).trim()===claveIngresada);
+
+    // Segundo intento: recargar usuarios de la hoja, pero con tiempo limitado.
+    if(!encontrado&&googleSheetsConfigured()){
+      await esperarConLimite(sincronizarDesdeGoogleSheets({force:true}),7000);
+      usuarios=getUsers();
+      encontrado=usuarios.find(x=>x.usuario.toLowerCase()===usuarioIngresado&&String(x.password).trim()===claveIngresada);
+    }
 
     if(!encontrado){
       loginError.style.display="block";
-      loginError.textContent="Usuario o contraseña incorrectos.";
+      loginError.textContent="Usuario o contraseña incorrectos. Verifique que el usuario esté activo en la hoja Usuarios.";
       return;
     }
 
-    currentUser=encontrado;
+    currentUser={...encontrado,perfil:normalizarPerfilUsuario(encontrado.perfil)};
     loginError.style.display="none";
     loginScreen.classList.add("hidden");
     app.classList.remove("hidden");
     aplicarPermisos();
     actualizarDashboard();
+
+    // Actualización silenciosa posterior al ingreso.
+    if(googleSheetsConfigured()){
+      esperarConLimite(sincronizarDesdeGoogleSheets({force:false}),15000).then(()=>{
+        const actualizado=getUsers().find(u=>u.usuario.toLowerCase()===currentUser?.usuario.toLowerCase());
+        if(actualizado){currentUser=actualizado;aplicarPermisos();actualizarDashboard();}
+      }).catch(()=>{});
+    }
   }catch(error){
     console.error("Error al iniciar sesión:",error);
     loginError.style.display="block";
-    loginError.textContent="Ocurrió un error al iniciar sesión. Revise el archivo actualizado.";
+    loginError.textContent="No se pudo iniciar sesión. Puede ingresar con los usuarios locales y sincronizar después.";
+  }finally{
+    const boton=document.querySelector('#loginScreen button[onclick="login()"]');
+    if(boton){boton.disabled=false;boton.textContent="Ingresar";}
   }
 }
 function logout(){currentUser=null;app.classList.add("hidden");loginScreen.classList.remove("hidden");loginPassword.value=""}
 function aplicarPermisos(){
+ currentUser.perfil=normalizarPerfilUsuario(currentUser.perfil);
  currentUserBadge.textContent=`${currentUser.usuario} · ${currentUser.perfil==="general"?"ADMINISTRADOR ACADÉMICO":currentUser.perfil.toUpperCase()}${currentUser.perfil==="sede"?" · "+currentUser.sede:""}`;
  headerScope.textContent=currentUser.perfil==="sede"?`Acceso limitado a ${currentUser.sede}`:"Acceso institucional";
  document.querySelectorAll(".admin-only").forEach(x=>x.style.display=currentUser.perfil==="admin"?"inline-block":"none");
@@ -2027,7 +2089,7 @@ async function sincronizarDesdeGoogleSheets(options={}){
 
 function refrescarInterfazDespuesDeCarga_(){
   if(!currentUser)return;
-  const updatedUser=getUsers().find(u=>u.usuario===currentUser.usuario);
+  const updatedUser=getUsers().find(u=>u.usuario.toLowerCase()===currentUser.usuario.toLowerCase());
   if(!updatedUser){logout();alert("El usuario actual ya no existe o fue desactivado en Google Sheets.");return;}
   currentUser=updatedUser;aplicarPermisos();
   if(typeof renderPreguntasConfig==="function")renderPreguntasConfig();
@@ -2062,13 +2124,21 @@ async function comandoAdminGoogleSheets(action,payload){
 window.addEventListener("online",()=>scheduleSyncFlush(200));
 window.addEventListener("DOMContentLoaded",()=>{
   sheetsInitialLoadPromise=(async()=>{
-    const connected=await probarConexionGoogleSheets();
-    if(!connected)return false;
-    const pending=Object.keys(readSyncQueue()).length;
-    if(pending)await flushSyncQueue();
-    if(Object.keys(readSyncQueue()).length===0)return sincronizarDesdeGoogleSheets({force:true});
-    setSheetsStatus("Existen cambios locales pendientes; use Enviar cambios o Cargar desde hoja.",true);
-    return false;
+    try{
+      const connected=await esperarConLimite(probarConexionGoogleSheets(),6000);
+      if(!connected)return false;
+      const pending=Object.keys(readSyncQueue()).length;
+      if(pending)await esperarConLimite(flushSyncQueue(),8000);
+      if(Object.keys(readSyncQueue()).length===0){
+        return await esperarConLimite(sincronizarDesdeGoogleSheets({force:true}),12000);
+      }
+      setSheetsStatus("Existen cambios locales pendientes; puede iniciar sesión y enviarlos después.",true);
+      return false;
+    }catch(error){
+      console.warn("Carga inicial de Google Sheets no disponible:",error);
+      setSheetsStatus("Modo local disponible. Sincronice cuando la conexión esté activa.",true);
+      return false;
+    }
   })();
 });
 
